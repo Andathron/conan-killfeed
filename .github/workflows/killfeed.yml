@@ -30,6 +30,7 @@ jobs:
           RCON_PORT: ${{ secrets.RCON_PORT }}             # optional
           RCON_PASSWORD: ${{ secrets.RCON_PASSWORD }}     # REQUIRED
           DISCORD_WEBHOOK_KILLS: ${{ secrets.DISCORD_WEBHOOK_KILLS }}  # REQUIRED
+          DISCORD_WEBHOOK_SCORE: ${{ secrets.DISCORD_WEBHOOK_SCORE }}  # for the scoreboard
         run: python watcher.py
 
       - name: Save bookmark
