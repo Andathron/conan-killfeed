@@ -1,0 +1,43 @@
+name: Conan Kill Feed
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 minutes (GitHub's minimum; may run late under load)
+  workflow_dispatch: {}      # lets you trigger it by hand from the Actions tab
+
+permissions:
+  contents: write            # needed so the run can save the bookmark back to the repo
+
+concurrency:
+  group: killfeed
+  cancel-in-progress: false  # never run two copies at once
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Run kill feed watcher
+        env:
+          RCON_HOST: ${{ secrets.RCON_HOST }}             # optional; defaults are in watcher.py
+          RCON_PORT: ${{ secrets.RCON_PORT }}             # optional
+          RCON_PASSWORD: ${{ secrets.RCON_PASSWORD }}     # REQUIRED
+          DISCORD_WEBHOOK_KILLS: ${{ secrets.DISCORD_WEBHOOK_KILLS }}  # REQUIRED
+        run: python watcher.py
+
+      - name: Save bookmark
+        run: |
+          if [ -n "$(git status --porcelain state.json)" ]; then
+            git config user.name "killfeed-bot"
+            git config user.email "killfeed-bot@users.noreply.github.com"
+            git add state.json
+            git commit -m "Update kill feed bookmark"
+            git push
+          fi
