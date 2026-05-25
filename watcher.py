@@ -74,10 +74,9 @@ DEBUG = os.environ.get("RCON_DEBUG", "1") == "1"
 def rcon_command(command, connect_timeout=10, read_timeout=8):
     """Connect, authenticate, run one command, return the raw text response.
 
-    Uses the standard Source-RCON 'sentinel packet' trick: after the real
-    command we send an empty command with id 3, and we keep reading until the
-    server echoes id 3 back - that marks the end of the (possibly multi-packet)
-    real response. Falls back to a timeout if the server never echoes.
+    Conan's RCON returns command output as packet type 2 and doesn't echo the
+    request id, so we read packets until the socket goes quiet and collect the
+    bodies.
     """
     with socket.create_connection((RCON_HOST, RCON_PORT), timeout=connect_timeout) as sock:
         sock.settimeout(read_timeout)
@@ -97,9 +96,12 @@ def rcon_command(command, connect_timeout=10, read_timeout=8):
         if auth_id == -1:
             raise RconError("RCON authentication failed (wrong password)")
 
-        # --- run the command, then a sentinel ---
+        # --- run the command and collect the reply ---
+        # Conan quirk: it returns command output as packet type 2 (not the
+        # standard type 0), and it does NOT echo our request id back. So we
+        # just read until the socket goes quiet. No sentinel packet - sending
+        # an empty command only produces a "couldn't parse" error.
         _send_packet(sock, 2, SERVERDATA_EXECCOMMAND, command)
-        _send_packet(sock, 3, SERVERDATA_EXECCOMMAND, "")
 
         chunks = []
         while True:
@@ -111,9 +113,7 @@ def rcon_command(command, connect_timeout=10, read_timeout=8):
                 break
             if DEBUG:
                 print(f"[cmd] id={rid} type={ptype} len={len(body)} body={body!r}")
-            if rid == 3:           # sentinel came back -> response complete
-                break
-            if ptype == SERVERDATA_RESPONSE_VALUE:
+            if ptype in (SERVERDATA_RESPONSE_VALUE, SERVERDATA_EXECCOMMAND):
                 chunks.append(body)
         return "".join(chunks)
 
