@@ -193,9 +193,15 @@ def _send_webhook(webhook_url, payload, method="POST", message_id=None):
     else:
         url = webhook_url + "?wait=true"   # ?wait=true makes Discord return the message (with id)
     data = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url, data=data, method=method, headers={"Content-Type": "application/json"}
-    )
+  req = urllib.request.Request(
+    url,
+    data=data,
+    method=method,
+    headers={
+        "Content-Type": "application/json",
+        "User-Agent": "ConanKillFeed/1.0"
+    }
+)
     with urllib.request.urlopen(req, timeout=15) as resp:
         raw = resp.read()
     try:
