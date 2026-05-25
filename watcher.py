@@ -68,36 +68,53 @@ def _recv_packet(sock):
     return req_id, ptype, body
 
 
-def rcon_command(command, timeout=10):
-    """Connect, authenticate, run one command, return the raw text response."""
-    with socket.create_connection((RCON_HOST, RCON_PORT), timeout=timeout) as sock:
-        sock.settimeout(timeout)
+DEBUG = os.environ.get("RCON_DEBUG", "1") == "1"
+
+
+def rcon_command(command, connect_timeout=10, read_timeout=8):
+    """Connect, authenticate, run one command, return the raw text response.
+
+    Uses the standard Source-RCON 'sentinel packet' trick: after the real
+    command we send an empty command with id 3, and we keep reading until the
+    server echoes id 3 back - that marks the end of the (possibly multi-packet)
+    real response. Falls back to a timeout if the server never echoes.
+    """
+    with socket.create_connection((RCON_HOST, RCON_PORT), timeout=connect_timeout) as sock:
+        sock.settimeout(read_timeout)
 
         # --- authenticate ---
         _send_packet(sock, 1, SERVERDATA_AUTH, RCON_PASSWORD)
         auth_id = None
-        for _ in range(4):
-            rid, ptype, _body = _recv_packet(sock)
+        for _ in range(5):
+            rid, ptype, body = _recv_packet(sock)
+            if DEBUG:
+                print(f"[auth] id={rid} type={ptype} body={body!r}")
             if ptype == SERVERDATA_AUTH_RESPONSE:
                 auth_id = rid
                 break
-        if auth_id is None or auth_id == -1:
-            raise RconError("RCON authentication failed (wrong password, or RCON not reachable)")
+        if auth_id is None:
+            raise RconError("No RCON auth response received")
+        if auth_id == -1:
+            raise RconError("RCON authentication failed (wrong password)")
 
-        # --- run the command ---
+        # --- run the command, then a sentinel ---
         _send_packet(sock, 2, SERVERDATA_EXECCOMMAND, command)
+        _send_packet(sock, 3, SERVERDATA_EXECCOMMAND, "")
 
-        # Read response packets until the socket goes quiet (handles small
-        # multi-packet responses without needing the dummy-packet dance).
-        sock.settimeout(2.0)
         chunks = []
-        try:
-            while True:
-                _rid, ptype, body = _recv_packet(sock)
-                if ptype == SERVERDATA_RESPONSE_VALUE:
-                    chunks.append(body)
-        except (socket.timeout, RconError):
-            pass
+        while True:
+            try:
+                rid, ptype, body = _recv_packet(sock)
+            except (socket.timeout, RconError) as e:
+                if DEBUG:
+                    print(f"[cmd] read ended: {e}")
+                break
+            if DEBUG:
+                print(f"[cmd] id={rid} type={ptype} len={len(body)} body={body!r}")
+            if rid == 3:           # sentinel came back -> response complete
+                break
+            if ptype == SERVERDATA_RESPONSE_VALUE:
+                chunks.append(body)
         return "".join(chunks)
 
 
