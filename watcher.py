@@ -27,6 +27,7 @@ RCON_HOST = os.environ.get("RCON_HOST", "")
 RCON_PORT = int(os.environ.get("RCON_PORT") or 0)
 RCON_PASSWORD = os.environ.get("RCON_PASSWORD", "")
 DISCORD_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_KILLS", "")
+DISCORD_SCORE_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_SCORE", "")  # optional
 STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 
 KILL_EVENT_TYPE = 103          # 103 = a player death
@@ -184,19 +185,59 @@ def save_state(state):
         json.dump(state, f)
 
 
-def post_discord(content):
-    data = json.dumps({"content": content}).encode("utf-8")
+def _send_webhook(webhook_url, payload, method="POST", message_id=None):
+    """POST a new webhook message (returns the created message dict, incl. its
+    id) or PATCH an existing one to edit it in place."""
+    if method == "PATCH":
+        url = f"{webhook_url}/messages/{message_id}"
+    else:
+        url = webhook_url + "?wait=true"   # ?wait=true makes Discord return the message (with id)
+    data = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
-        DISCORD_WEBHOOK,
-        data=data,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": "ConanKillFeed/1.0"
-        }
+        url, data=data, method=method, headers={"Content-Type": "application/json"}
     )
-    with urllib.request.urlopen(req, timeout=15) as response:
-        print("Discord response:", response.status)
-        pass
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        raw = resp.read()
+    try:
+        return json.loads(raw)
+    except (ValueError, json.JSONDecodeError):
+        return None
+
+
+def post_discord(content):
+    """Post a message to the kill-feed channel."""
+    _send_webhook(DISCORD_WEBHOOK, {"content": content})
+
+
+def build_scoreboard(kills, deaths):
+    players = set(kills) | set(deaths)
+    if not players:
+        return "\U0001F3C6 **PvP Scoreboard**\n\n_No kills yet._"
+    # Rank by most kills, then fewest deaths, then name.
+    ordered = sorted(players, key=lambda p: (-kills.get(p, 0), deaths.get(p, 0), p.lower()))
+    lines = ["\U0001F3C6 **PvP Scoreboard**", ""]
+    for i, p in enumerate(ordered[:25], start=1):
+        lines.append(f"{i}. **{p}** \u2014 {kills.get(p, 0)} K / {deaths.get(p, 0)} D")
+    return "\n".join(lines)
+
+
+def update_scoreboard(state):
+    """Create or edit the single scoreboard message in the score channel."""
+    if not DISCORD_SCORE_WEBHOOK:
+        return
+    payload = {"content": build_scoreboard(state.get("kills", {}), state.get("deaths", {}))}
+    msg_id = state.get("score_message_id")
+    if msg_id:
+        try:
+            _send_webhook(DISCORD_SCORE_WEBHOOK, payload, method="PATCH", message_id=msg_id)
+            return
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                raise
+            # the message was deleted - fall through and post a fresh one
+    result = _send_webhook(DISCORD_SCORE_WEBHOOK, payload, method="POST")
+    if result and "id" in result:
+        state["score_message_id"] = result["id"]
 
 
 # ---------------------------------------------------------------------------
@@ -212,6 +253,8 @@ def main():
 
     state = load_state()
     last = state.get("last_rowid")
+    kills_tally = state.setdefault("kills", {})
+    deaths_tally = state.setdefault("deaths", {})
 
     # First run ever: bookmark "now" so we don't replay the whole history.
     if last is None:
@@ -221,17 +264,20 @@ def main():
         print(f"Bootstrapped bookmark at rowid {current}. No kills posted on first run.")
         return
 
-    kills = fetch_new_kills(last)
+    new_kills = fetch_new_kills(last)
     highest = last
-    for rowid, victim, killer in kills:
+    for rowid, victim, killer in new_kills:
         post_discord(f"\u2620\ufe0f  **{killer}** killed **{victim}**")
+        kills_tally[killer] = kills_tally.get(killer, 0) + 1
+        deaths_tally[victim] = deaths_tally.get(victim, 0) + 1
         highest = max(highest, rowid)
 
-    if highest != last:
+    if new_kills:
+        update_scoreboard(state)          # create/refresh the scoreboard message
         state["last_rowid"] = highest
         save_state(state)
 
-    print(f"Posted {len(kills)} kill(s). Bookmark is now rowid {highest}.")
+    print(f"Posted {len(new_kills)} kill(s). Bookmark is now rowid {highest}.")
 
 
 if __name__ == "__main__":
