@@ -187,9 +187,15 @@ def save_state(state):
 def post_discord(content):
     data = json.dumps({"content": content}).encode("utf-8")
     req = urllib.request.Request(
-        DISCORD_WEBHOOK, data=data, headers={"Content-Type": "application/json"}
+        DISCORD_WEBHOOK,
+        data=data,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": "ConanKillFeed/1.0"
+        }
     )
-    with urllib.request.urlopen(req, timeout=15):
+    with urllib.request.urlopen(req, timeout=15) as response:
+        print("Discord response:", response.status)
         pass
 
 
