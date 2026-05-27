@@ -313,21 +313,41 @@ ADMIN_LINE_RE = re.compile(
 
 
 def fetch_admin_log():
-    lines = []
+    possible_paths = [
+        FTP_LOG_PATH,
+        "ConanSandbox/Saved/Logs/ServerCommandLog.log",
+        "Saved/Logs/ServerCommandLog.log",
+        "Logs/ServerCommandLog.log",
+        "ServerCommandLog.log",
+    ]
 
     ftp = FTP()
     ftp.connect(FTP_HOST, FTP_PORT, timeout=25)
     ftp.login(FTP_USER, FTP_PASS)
 
     try:
-        ftp.retrlines("RETR " + FTP_LOG_PATH, lines.append)
+        print("FTP CURRENT DIRECTORY:", ftp.pwd())
+
+        for path in possible_paths:
+            lines = []
+            try:
+                print("TRYING FTP PATH:", path)
+                ftp.retrlines("RETR " + path, lines.append)
+                print("SUCCESS FTP PATH:", path)
+                return lines
+            except Exception as e:
+                print("FAILED FTP PATH:", path, e)
+
+        print("FTP FILE LIST:")
+        ftp.retrlines("LIST")
+
+        raise RuntimeError("Could not find ServerCommandLog.log")
+
     finally:
         try:
             ftp.quit()
         except Exception:
             ftp.close()
-
-    return lines
 
 
 def parse_admin_actions(lines):
