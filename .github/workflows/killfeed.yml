@@ -37,7 +37,7 @@ jobs:
           FTP_USER: ${{ secrets.FTP_USER }}               # for the admin audit
           FTP_PASS: ${{ secrets.FTP_PASS }}               # for the admin audit
           FTP_LOG_PATH: ${{ secrets.FTP_LOG_PATH }}
-          DISCORD_WEBHOOK_ADMIN: ${{ secrets.DISCORD_WEBHOOK_ADMIN }}  # for the admin audit
+          
         run: python watcher.py
 
       - name: Save bookmark
