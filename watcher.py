@@ -2,13 +2,10 @@
 """
 Conan Exiles -> Discord PvP kill feed.
 
-Runs on a schedule, such as GitHub Actions.
-
 Features:
   - PvP kill feed
   - PvP scoreboard
   - Admin audit from ServerCommandLog.log over FTP
-  - Discord webhook posting with User-Agent header fix
 """
 
 import os
@@ -21,9 +18,6 @@ import urllib.request
 import urllib.error
 from ftplib import FTP
 
-# ---------------------------------------------------------------------------
-# Configuration
-# ---------------------------------------------------------------------------
 RCON_HOST = os.environ.get("RCON_HOST", "")
 RCON_PORT = int(os.environ.get("RCON_PORT") or 0)
 RCON_PASSWORD = os.environ.get("RCON_PASSWORD", "")
@@ -33,7 +27,6 @@ DISCORD_SCORE_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_SCORE", "")
 
 STATE_FILE = os.environ.get("STATE_FILE", "state.json")
 
-# --- Admin audit ---
 FTP_HOST = os.environ.get("FTP_HOST", "")
 FTP_PORT = int(os.environ.get("FTP_PORT") or 21)
 FTP_USER = os.environ.get("FTP_USER", "")
@@ -42,13 +35,9 @@ FTP_LOG_PATH = os.environ.get("FTP_LOG_PATH", "ConanSandbox/Saved/Logs/ServerCom
 DISCORD_ADMIN_WEBHOOK = os.environ.get("DISCORD_WEBHOOK_ADMIN", "")
 
 MAX_ADMIN_LINES_PER_RUN = 25
-
 KILL_EVENT_TYPE = 103
 MAX_KILLS_PER_RUN = 50
 
-# ---------------------------------------------------------------------------
-# RCON
-# ---------------------------------------------------------------------------
 SERVERDATA_AUTH = 3
 SERVERDATA_AUTH_RESPONSE = 2
 SERVERDATA_EXECCOMMAND = 2
@@ -126,9 +115,6 @@ def rcon_command(command, connect_timeout=10, read_timeout=8):
         return "".join(chunks)
 
 
-# ---------------------------------------------------------------------------
-# SQL parsing
-# ---------------------------------------------------------------------------
 def _row_cells(line):
     return [c.strip() for c in line.split("|")]
 
@@ -183,9 +169,6 @@ def fetch_new_kills(last_rowid):
     return kills
 
 
-# ---------------------------------------------------------------------------
-# State
-# ---------------------------------------------------------------------------
 def load_state():
     try:
         with open(STATE_FILE) as f:
@@ -199,12 +182,7 @@ def save_state(state):
         json.dump(state, f)
 
 
-# ---------------------------------------------------------------------------
-# Discord
-# ---------------------------------------------------------------------------
 def _send_webhook(webhook_url, payload, method="POST", message_id=None):
-    """POST a new webhook message or PATCH an existing one."""
-
     if method == "PATCH":
         url = f"{webhook_url}/messages/{message_id}"
     else:
@@ -241,28 +219,20 @@ def post_kill(killer, victim):
     _send_webhook(DISCORD_WEBHOOK, {"embeds": [embed]})
 
 
-# ---------------------------------------------------------------------------
-# Scoreboard
-# ---------------------------------------------------------------------------
 def build_scoreboard(kills, deaths):
     players = set(kills) | set(deaths)
 
     if not players:
         return "_No kills yet — get out there._"
 
-    ordered = sorted(
-        players,
-        key=lambda p: (-kills.get(p, 0), deaths.get(p, 0), p.lower())
-    )
+    ordered = sorted(players, key=lambda p: (-kills.get(p, 0), deaths.get(p, 0), p.lower()))
 
     medals = ["🥇", "🥈", "🥉"]
     lines = []
 
     for i, player in enumerate(ordered[:25]):
         rank = medals[i] if i < 3 else f"`{i + 1}.`"
-        lines.append(
-            f"{rank} **{player}** — {kills.get(player, 0)} K / {deaths.get(player, 0)} D"
-        )
+        lines.append(f"{rank} **{player}** — {kills.get(player, 0)} K / {deaths.get(player, 0)} D")
 
     return "\n".join(lines)
 
@@ -273,10 +243,7 @@ def update_scoreboard(state):
 
     embed = {
         "title": "🏆 PvP Leaderboard",
-        "description": build_scoreboard(
-            state.get("kills", {}),
-            state.get("deaths", {})
-        ),
+        "description": build_scoreboard(state.get("kills", {}), state.get("deaths", {})),
         "color": 0xF1C40F,
         "footer": {"text": "Updates automatically after every kill"},
     }
@@ -286,12 +253,7 @@ def update_scoreboard(state):
 
     if msg_id:
         try:
-            _send_webhook(
-                DISCORD_SCORE_WEBHOOK,
-                payload,
-                method="PATCH",
-                message_id=msg_id
-            )
+            _send_webhook(DISCORD_SCORE_WEBHOOK, payload, method="PATCH", message_id=msg_id)
             return
         except urllib.error.HTTPError as e:
             if e.code != 404:
@@ -303,9 +265,6 @@ def update_scoreboard(state):
         state["score_message_id"] = result["id"]
 
 
-# ---------------------------------------------------------------------------
-# Admin audit
-# ---------------------------------------------------------------------------
 ADMIN_LINE_RE = re.compile(
     r"^\[(?P<ts>\d{4}\.\d\d\.\d\d-\d\d\.\d\d\.\d\d:\d+)\]\[\s*\d+\]"
     r"Player (?P<player>.+?)#\d+ (?P<action>.+?) \(player is admin\)\s*$"
@@ -330,22 +289,29 @@ def fetch_admin_log():
 
         for path in possible_paths:
             lines = []
+
             try:
                 print("TRYING FTP PATH:", path)
+
+                ftp.cwd("/")
+
                 parts = path.split("/")
+                filename = parts.pop()
 
-filename = parts.pop()
+                for folder in parts:
+                    if folder:
+                        ftp.cwd(folder)
 
-for folder in parts:
-    ftp.cwd(folder)
+                ftp.retrlines("RETR " + filename, lines.append)
 
-ftp.retrlines("RETR " + filename, lines.append)
                 print("SUCCESS FTP PATH:", path)
                 return lines
+
             except Exception as e:
                 print("FAILED FTP PATH:", path, e)
 
         print("FTP FILE LIST:")
+        ftp.cwd("/")
         ftp.retrlines("LIST")
 
         raise RuntimeError("Could not find ServerCommandLog.log")
@@ -371,13 +337,7 @@ def parse_admin_actions(lines):
         if action.startswith("used command: "):
             action = action[len("used command: "):].strip()
 
-        actions.append(
-            (
-                match.group("ts"),
-                match.group("player"),
-                action
-            )
-        )
+        actions.append((match.group("ts"), match.group("player"), action))
 
     return actions
 
@@ -465,9 +425,7 @@ def run_admin_audit(state):
     ]
 
     if len(deduped) > MAX_ADMIN_LINES_PER_RUN:
-        body.append(
-            f"\n_…and {len(deduped) - MAX_ADMIN_LINES_PER_RUN} more this period._"
-        )
+        body.append(f"\n_…and {len(deduped) - MAX_ADMIN_LINES_PER_RUN} more this period._")
 
     embed = {
         "title": "🛡️ Admin Activity",
@@ -481,15 +439,9 @@ def run_admin_audit(state):
     state["last_admin_ts"] = new_actions[-1][0]
     save_state(state)
 
-    print(
-        f"Admin audit: posted {len(shown)} action(s). "
-        f"Bookmark now {new_actions[-1][0]}."
-    )
+    print(f"Admin audit: posted {len(shown)} action(s). Bookmark now {new_actions[-1][0]}.")
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
 def main():
     if not RCON_HOST or not RCON_PORT:
         sys.exit("ERROR: RCON_HOST / RCON_PORT not set.")
