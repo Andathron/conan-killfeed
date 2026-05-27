@@ -332,7 +332,14 @@ def fetch_admin_log():
             lines = []
             try:
                 print("TRYING FTP PATH:", path)
-                ftp.retrlines("RETR " + path, lines.append)
+                parts = path.split("/")
+
+filename = parts.pop()
+
+for folder in parts:
+    ftp.cwd(folder)
+
+ftp.retrlines("RETR " + filename, lines.append)
                 print("SUCCESS FTP PATH:", path)
                 return lines
             except Exception as e:
