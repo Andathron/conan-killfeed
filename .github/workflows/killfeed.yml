@@ -31,6 +31,11 @@ jobs:
           RCON_PASSWORD: ${{ secrets.RCON_PASSWORD }}     # REQUIRED
           DISCORD_WEBHOOK_KILLS: ${{ secrets.DISCORD_WEBHOOK_KILLS }}  # REQUIRED
           DISCORD_WEBHOOK_SCORE: ${{ secrets.DISCORD_WEBHOOK_SCORE }}  # for the scoreboard
+          FTP_HOST: ${{ secrets.FTP_HOST }}               # for the admin audit
+          FTP_PORT: ${{ secrets.FTP_PORT }}               # for the admin audit
+          FTP_USER: ${{ secrets.FTP_USER }}               # for the admin audit
+          FTP_PASS: ${{ secrets.FTP_PASS }}               # for the admin audit
+          DISCORD_WEBHOOK_ADMIN: ${{ secrets.DISCORD_WEBHOOK_ADMIN }}  # for the admin audit
         run: python watcher.py
 
       - name: Save bookmark
